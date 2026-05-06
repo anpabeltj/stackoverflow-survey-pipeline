@@ -4,3 +4,4 @@ logs/
 seeds/raw_survey.csv
 .env
 .DS_STORE
+.vscode/
