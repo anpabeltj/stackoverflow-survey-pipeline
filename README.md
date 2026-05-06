@@ -8,7 +8,9 @@ A data pipeline project that processes the **Stack Overflow Developer Survey 202
 
 1. **Extract** — A Python script reads the raw Stack Overflow survey CSV and samples 5,000 responses with a selected set of meaningful columns.
 2. **Load** — The sampled data is stored as a dbt seed, acting as the raw source layer.
-3. **Transform** — A dbt staging model cleans and standardizes the data (renaming columns, handling nulls, fixing data types).
+3. **Transform** — dbt models clean, standardize, and aggregate the data across two layers:
+   - **Staging** — renames columns, filters nulls, and fixes data types
+   - **Marts** — produces ready-to-use analytical tables on developer profiles and technology popularity
 
 ---
 
@@ -16,14 +18,20 @@ A data pipeline project that processes the **Stack Overflow Developer Survey 202
 
 ```
 stackoverflow_survey/
-├── extract.py              # Python script to extract and sample raw survey data
+├── extract.py                        # Python script to extract and sample raw survey data
 ├── seeds/
-│   └── raw_survey.csv      # Sampled survey data (5,000 rows), loaded as dbt seed
+│   └── raw_survey.csv                # Sampled survey data (5,000 rows), loaded as dbt seed
 ├── models/
-│   ├── schema.yml          # Column descriptions and data tests
-│   └── staging/
-│       └── stg_survey.sql  # Staging model: cleaned and renamed survey data
-├── dbt_project.yml         # dbt project configuration
+│   ├── staging/
+│   │   ├── schema.yml                # Column descriptions and data tests
+│   │   └── stg_survey.sql            # Staging model: cleaned and renamed survey data
+│   └── marts/
+│       ├── developer/
+│       │   └── developer_profile.sql # Developer demographics and experience level
+│       └── tech/
+│           ├── language_popularity.sql   # Most used programming languages
+│           └── database_popularity.sql   # Most used databases
+├── dbt_project.yml                   # dbt project configuration
 └── README.md
 ```
 
@@ -58,7 +66,9 @@ The Python script (`extract.py`) selects the following columns from the full sur
 
 ## 🔧 Models
 
-### `stg_survey` (Staging Layer)
+### Staging Layer
+
+#### `stg_survey`
 
 **Materialization:** View
 
@@ -75,37 +85,98 @@ This model reads from the `raw_survey` seed and applies the following transforma
 
 ---
 
+### Marts Layer
+
+All marts models are materialized as **tables** and built on top of `stg_survey`.
+
+#### `developer_profile`
+
+**Location:** `models/marts/developer/developer_profile.sql`
+
+Produces a profile of each survey respondent enriched with two derived fields:
+
+| Column             | Description                                                                                          |
+| ------------------ | ---------------------------------------------------------------------------------------------------- |
+| `age`              | Age group of the respondent                                                                          |
+| `country`          | Country of residence                                                                                 |
+| `dev_type`         | Type of developer role                                                                               |
+| `employment`       | Employment status                                                                                    |
+| `education_level`  | Highest education level                                                                              |
+| `remote_work`      | Work arrangement                                                                                     |
+| `org_size`         | Organization size                                                                                    |
+| `salary_level`     | Bucketed salary: `Entry` (below $50K), `Mid` ($50K to $100K), `Senior` (above $100K), or `Unknown`   |
+| `experience_level` | Bucketed experience: `Junior` (0 to 3 yrs), `Mid` (4 to 7 yrs), `Senior` (above 7 yrs), or `Unknown` |
+
+#### `language_popularity`
+
+**Location:** `models/marts/tech/language_popularity.sql`
+
+Counts how many developers have worked with each programming language. Languages are split from the multi-value `LanguageHaveWorkedWith` field.
+
+| Column                 | Description                       |
+| ---------------------- | --------------------------------- |
+| `programming_language` | Name of the programming language  |
+| `developer_count`      | Number of respondents who used it |
+
+#### `database_popularity`
+
+**Location:** `models/marts/tech/database_popularity.sql`
+
+Counts how many developers have worked with each database tool. Databases are split from the multi-value `DatabaseHaveWorkedWith` field.
+
+| Column            | Description                       |
+| ----------------- | --------------------------------- |
+| `database_tools`  | Name of the database or tool      |
+| `developer_count` | Number of respondents who used it |
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites
 
 - Python 3.x
-- dbt (configured with the `stackoverflow_survey` profile)
-- A compatible database (PostgreSQL or DuckDB)
+- dbt installed and configured
 
-### 1. Extract the raw data
+### Step 1 — Set up the Python environment
 
-Run the Python script to generate the seed file:
+Create and activate a virtual environment, then install dependencies:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install pandas dbt-core
+```
+
+### Step 2 — Download the raw survey data
+
+The raw survey file is not included in this repository. Download `survey_results_public.csv` from the Stack Overflow Annual Developer Survey page and place it in the **project root** folder (next to `extract.py`).
+
+### Step 3 — Extract the sample data
+
+Run the Python script to generate the seed file from the raw survey:
 
 ```bash
 python extract.py
 ```
 
-This reads `survey_results_public.csv` from the project root and writes a 5,000-row sample to `seeds/raw_survey.csv`.
+This reads `survey_results_public.csv` and writes a 5,000-row random sample to `seeds/raw_survey.csv`.
 
-### 2. Load the seed into the database
+### Step 4 — Load the seed into the database
 
 ```bash
 dbt seed
 ```
 
-### 3. Run the models
+### Step 5 — Run the models
 
 ```bash
 dbt run
 ```
 
-### 4. Run data tests
+This builds both the staging view and all three marts tables.
+
+### Step 6 — Run data tests
 
 ```bash
 dbt test
@@ -115,7 +186,7 @@ dbt test
 
 ## ⚙️ Configuration
 
-The dbt project profile is named `stackoverflow_survey`. Make sure your `~/.dbt/profiles.yml` file contains a matching profile pointing to your database.
+The dbt project profile is named `stackoverflow_survey`.
 
 Model materialization defaults:
 
