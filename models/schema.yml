@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: stg_survey
+    description: "Cleaned and standardized Stack Overflow Developer Survey 2023"
+    columns:
+      - name: response_id
+        description: "Unique identifier for each survey response"
+        data_tests:
+          - unique
+          - not_null:
+              config:
+                severity: warn
+
+      - name: employment
+        description: "Employment status of respondent"
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: country
+        description: "Country of respondent"
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
