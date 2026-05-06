@@ -1,0 +1,7 @@
+[sqlfluff]
+templater = jinja
+dialect = postgres
+exclude_rules = JJ01, CP02, RF06, ST02
+
+[sqlfluff:templater:jinja]
+apply_dbt_builtins = true
