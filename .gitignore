@@ -1,0 +1,5 @@
+target/
+dbt_packages/
+logs/
+seeds/raw_survey.csv
+.env
