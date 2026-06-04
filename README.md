@@ -2,6 +2,9 @@
 
 A data pipeline project that processes the **Stack Overflow Developer Survey 2023** using **dbt (data build tool)**. It extracts, loads, and transforms survey data to make it ready for analysis.
 
+<img width="1005" height="420" alt="image" src="https://github.com/user-attachments/assets/2c56ffab-591e-41b9-ba0c-86638acbce06" />
+
+
 ---
 
 ## 🗂️ What This Project Does
