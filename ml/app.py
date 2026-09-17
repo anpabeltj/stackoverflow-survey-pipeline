@@ -37,6 +37,11 @@ def load_artifacts():
 
 st.set_page_config(page_title="Developer Salary Level Predictor", page_icon="💼", layout="centered")
 
+# App starts before the DAG has run, so show a message instead of crashing
+if not os.path.exists(os.path.join(ARTIFACT_DIR, "salary_model.joblib")):
+    st.info("Model not trained yet. Trigger the stackoverflow_survey_pipeline DAG in Airflow, then refresh this page.")
+    st.stop()
+
 model, options, metrics = load_artifacts()
 
 # Header

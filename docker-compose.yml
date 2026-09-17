@@ -16,44 +16,76 @@ services:
       timeout: 5s
       retries: 10
 
-  pipeline:
+  airflow-postgres:
+    image: postgres:15
+    container_name: so-airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  airflow:
     build: .
     image: so-survey-pipeline
-    container_name: so-pipeline
+    container_name: so-airflow
+    user: "${AIRFLOW_UID:-50000}:0"
     env_file: .env
     environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/project/dags
+      # Warehouse connection used by load.py, dbt, and train.py
       DB_HOST: postgres
       DB_PORT: "5432"
-      DBT_PROFILES_DIR: /app
+      DBT_PROFILES_DIR: /opt/airflow/project
+      # Keep dbt output out of the mounted folder
+      DBT_TARGET_PATH: /tmp/dbt_target
+      DBT_LOG_PATH: /tmp/dbt_logs
     volumes:
-      - .:/app
+      - .:/opt/airflow/project
+      - airflow_logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      airflow-postgres:
+        condition: service_healthy
     command: >
-      sh -c "mkdir -p data &&
-             python extract.py &&
-             python load.py &&
-             dbt debug &&
-             dbt run &&
-             dbt test &&
-             python ml/train.py"
+      bash -c "airflow db migrate &&
+               (airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true) &&
+               { airflow scheduler & exec airflow webserver; }"
 
   app:
     image: so-survey-pipeline
     pull_policy: never
     container_name: so-app
-    env_file: .env
     environment:
       STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
     volumes:
-      - .:/app
+      - .:/opt/airflow/project
     ports:
       - "8501:8501"
+    working_dir: /opt/airflow/project
+    # Skip the Airflow entrypoint and run Streamlit from the pipeline venv
+    entrypoint:
+      - /opt/airflow/venv_pipeline/bin/streamlit
+      - run
+      - ml/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
     depends_on:
-      pipeline:
-        condition: service_completed_successfully
-    command: streamlit run ml/app.py --server.address=0.0.0.0 --server.port=8501
+      - airflow
 
 volumes:
   pgdata:
+  airflow_pgdata:
+  airflow_logs:
