@@ -1,0 +1,17 @@
+version: 2
+
+models:
+  - name: language_popularity
+    description: Number of developers who have worked with each programming language.
+    columns:
+      - name: programming_language
+        data_tests:
+          - unique
+          - not_null
+  - name: database_popularity
+    description: Number of developers who have worked with each database.
+    columns:
+      - name: database_tools
+        data_tests:
+          - unique
+          - not_null

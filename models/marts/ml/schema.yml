@@ -4,9 +4,17 @@ models:
   - name: ml_salary_features
     description: Feature table for salary level classification. Only respondents with a known salary.
     columns:
+      - name: response_id
+        description: Survey response identifier, also a foreign key to developer_profile
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              to: ref('developer_profile')
+              field: response_id
       - name: salary_level
         description: Target label
         data_tests:
           - not_null
           - accepted_values:
-              values: ['Entry', 'Mid', 'Senior']
+              values: ["Entry", "Mid", "Senior"]

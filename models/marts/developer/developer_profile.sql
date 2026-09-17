@@ -3,6 +3,7 @@ with survey as (
 )
 
 select
+    s.response_id,
     s.age,
     s.country,
     s.dev_type,
@@ -13,7 +14,7 @@ select
     case
         when s.converted_comp_yearly is null then 'Unknown'
         when s.converted_comp_yearly < 50000 then 'Entry'
-        when s.converted_comp_yearly between 50001 and 100000 then 'Mid'
+        when s.converted_comp_yearly <= 100000 then 'Mid'
         else 'Senior'
     end as salary_level,
     case

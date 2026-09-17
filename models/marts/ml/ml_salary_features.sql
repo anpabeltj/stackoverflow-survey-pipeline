@@ -1,4 +1,5 @@
 select
+    response_id,
     country,
     age,
     education_level,
