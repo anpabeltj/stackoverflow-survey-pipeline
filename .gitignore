@@ -5,3 +5,7 @@ logs/
 .DS_STORE
 .vscode/
 dbt_internal_packages/
+survey_results_public.csv
+data/
+.user.yml
+ml/artifacts/

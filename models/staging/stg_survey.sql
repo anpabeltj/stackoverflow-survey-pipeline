@@ -1,5 +1,5 @@
 with survey as (
-    select * from {{ ref('raw_survey') }}
+    select * from {{ source('raw', 'raw_survey') }}
 )
 
 select
@@ -18,10 +18,7 @@ select
     survey."AISelect" as ai_select,
     survey."AISent" as ai_sent,
     survey."AIBen" as ai_ben,
-    case
-        when survey."ConvertedCompYearly"::text = 'NA' then NULL
-        else survey."ConvertedCompYearly"::int
-    end as converted_comp_yearly
+    nullif(survey."ConvertedCompYearly"::text, 'NA')::numeric::int as converted_comp_yearly
 from survey
 where
     survey."ResponseId" is not NULL

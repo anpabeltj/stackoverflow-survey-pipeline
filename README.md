@@ -1,41 +1,97 @@
 # 📊 Stack Overflow Developer Survey Pipeline
 
-A data pipeline project that processes the **Stack Overflow Developer Survey 2023** using **dbt (data build tool)**. It extracts, loads, and transforms survey data to make it ready for analysis.
-
-<img width="656" height="280" alt="image" src="https://github.com/user-attachments/assets/3ac4175f-f3e7-4e06-b159-8a971d8ca9ac" />
-
-
+An end-to-end **ELT (Extract, Load, Transform)** pipeline with a **machine learning** layer, built on the **Stack Overflow Developer Survey 2023**. Raw survey data is extracted with Python, loaded into PostgreSQL, transformed with **dbt**, and used to train a salary level classifier served through a **Streamlit** app. The whole stack runs with a single `docker compose up` command.
 
 ---
 
-## 🗂️ What This Project Does
+## 📐 Architecture Overview
 
-1. **Extract** — A Python script reads the raw Stack Overflow survey CSV and samples 5,000 responses with a selected set of meaningful columns.
-2. **Load** — The sampled data is stored as a dbt seed, acting as the raw source layer.
-3. **Transform** — dbt models clean, standardize, and aggregate the data across two layers:
-   - **Staging** — renames columns, filters nulls, and fixes data types
-   - **Marts** — produces ready-to-use analytical tables on developer profiles and technology popularity
+```
+┌──────────────────────────────────────────────────────────┐
+│                     Source Layer                         │
+│     survey_results_public.csv (full 2023 survey)         │
+└────────────────────────────┬─────────────────────────────┘
+                             │ Extract (Python + pandas)
+                             │ select 16 columns, sample 30,000 rows
+                             ▼
+┌──────────────────────────────────────────────────────────┐
+│                  data/raw_survey.csv                     │
+└────────────────────────────┬─────────────────────────────┘
+                             │ Load (Python + SQLAlchemy)
+                             ▼
+┌──────────────────────────────────────────────────────────┐
+│                 Raw Layer  🗄️  (schema: raw)             │
+│                      raw_survey                          │
+└────────────────────────────┬─────────────────────────────┘
+                             │ Transform (dbt)
+                             ▼
+┌──────────────────────────────────────────────────────────┐
+│             Staging Layer  🧹  (schema: analytics)       │
+│                   stg_survey (view)                      │
+└────────────────────────────┬─────────────────────────────┘
+                             ▼
+┌──────────────────────────────────────────────────────────┐
+│               Mart Layer  📊  (schema: analytics)        │
+│   developer_profile     language_popularity              │
+│   database_popularity   ml_salary_features               │
+└────────────────────────────┬─────────────────────────────┘
+                             │ Train (scikit-learn)
+                             ▼
+┌──────────────────────────────────────────────────────────┐
+│                   ML Layer  🤖                           │
+│   ml/artifacts/salary_model.joblib                       │
+│   Streamlit app on http://localhost:8501                 │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🏗️ Tech Stack
+
+| Layer            | Tool                                         |
+| ---------------- | -------------------------------------------- |
+| Extract & Load   | Python 3.11, pandas 2.2.3, SQLAlchemy 2.0.36 |
+| Storage          | PostgreSQL 15                                |
+| Transformation   | dbt-core 1.9.1, dbt-postgres 1.9.0           |
+| Data Quality     | dbt tests, SQLFluff                          |
+| Machine Learning | scikit-learn 1.5.2, joblib 1.4.2             |
+| App              | Streamlit 1.40.1                             |
+| Containerisation | Docker Compose                               |
 
 ---
 
 ## 📁 Project Structure
 
 ```
-stackoverflow_survey/
-├── extract.py                        # Python script to extract and sample raw survey data
-├── seeds/
-│   └── raw_survey.csv                # Sampled survey data (5,000 rows), loaded as dbt seed
+stackoverflow-survey-pipeline/
+├── extract.py                        # Select columns and sample raw survey data
+├── load.py                           # Load sampled CSV into PostgreSQL (raw schema)
 ├── models/
 │   ├── staging/
+│   │   ├── sources.yml               # Declares raw.raw_survey as a dbt source
 │   │   ├── schema.yml                # Column descriptions and data tests
-│   │   └── stg_survey.sql            # Staging model: cleaned and renamed survey data
+│   │   └── stg_survey.sql            # Cleaned and renamed survey data
 │   └── marts/
 │       ├── developer/
-│       │   └── developer_profile.sql # Developer demographics and experience level
-│       └── tech/
-│           ├── language_popularity.sql   # Most used programming languages
-│           └── database_popularity.sql   # Most used databases
+│       │   └── developer_profile.sql     # Developer demographics and experience level
+│       ├── tech/
+│       │   ├── language_popularity.sql   # Most used programming languages
+│       │   └── database_popularity.sql   # Most used databases
+│       └── ml/
+│           ├── ml_salary_features.sql    # Feature table for the salary model
+│           └── schema.yml                # Label tests
+├── ml/
+│   ├── train.py                      # Train and evaluate the salary level classifier
+│   ├── app.py                        # Streamlit prediction app
+│   └── artifacts/                    # Model, metrics, dropdown options (not committed)
+├── data/                             # Generated by extract.py (not committed)
+├── docker-compose.yml                # PostgreSQL, pipeline, and app services
+├── Dockerfile                        # Shared image (Python, dbt, ML libraries)
+├── .dockerignore                     # Keeps large files out of the build context
+├── requirements.txt                  # Pinned Python dependencies
+├── profiles.yml                      # dbt connection profile (reads env vars)
 ├── dbt_project.yml                   # dbt project configuration
+├── .env.example                      # Template for environment variables
 └── README.md
 ```
 
@@ -43,9 +99,9 @@ stackoverflow_survey/
 
 ## 📋 Data Source
 
-The raw data comes from the **Stack Overflow Developer Survey 2023** (publicly available dataset).
+The raw data comes from the **Stack Overflow Developer Survey 2023**, a publicly available dataset.
 
-The Python script (`extract.py`) selects the following columns from the full survey:
+`extract.py` selects the following columns from the full survey:
 
 | Column                   | Description                                  |
 | ------------------------ | -------------------------------------------- |
@@ -68,36 +124,45 @@ The Python script (`extract.py`) selects the following columns from the full sur
 
 ---
 
-## 🔧 Models
+## 🔄 Pipeline Flow
 
-### Staging Layer
+### Step 1 🔽 Extract (`extract.py`)
 
-#### `stg_survey`
+1. Reads `survey_results_public.csv` from the project root
+2. Selects the 16 columns listed above
+3. Samples 30,000 rows with `random_state=42` for reproducibility
+4. Writes the result to `data/raw_survey.csv`
+
+### Step 2 📥 Load (`load.py`)
+
+1. Reads database credentials from environment variables
+2. Creates the `raw` schema if it does not exist
+3. Drops the previous `raw.raw_survey` with `CASCADE` (dependent dbt views are rebuilt in the next step)
+4. Reads the CSV with every column as text, so type handling stays in the transform layer
+5. Loads the data into `raw.raw_survey` in chunks of 1,000 rows
+
+### Step 3 🔁 Transform (dbt)
+
+#### Staging: `stg_survey`
 
 **Materialization:** View
 
-This model reads from the `raw_survey` seed and applies the following transformations:
+Reads from the `raw.raw_survey` source and:
 
 - Renames all columns to snake_case
 - Filters out rows where `ResponseId`, `Country`, or `Employment` is null
-- Converts `ConvertedCompYearly` to an integer, replacing `'NA'` with `NULL`
+- Converts `ConvertedCompYearly` from text to integer, treating `'NA'` as `NULL`
 
 **Data tests applied:**
 
 - `response_id`: must be unique
-- `response_id`, `employment`, `country`: warned when null values are found
+- `response_id`, `employment`, `country`: warn when null values are found
 
----
+#### Marts
 
-### Marts Layer
+All marts are materialized as **tables** and built on top of `stg_survey`.
 
-All marts models are materialized as **tables** and built on top of `stg_survey`.
-
-#### `developer_profile`
-
-**Location:** `models/marts/developer/developer_profile.sql`
-
-Produces a profile of each survey respondent enriched with two derived fields:
+**`developer_profile`** (`models/marts/developer/developer_profile.sql`)
 
 | Column             | Description                                                                                          |
 | ------------------ | ---------------------------------------------------------------------------------------------------- |
@@ -111,97 +176,197 @@ Produces a profile of each survey respondent enriched with two derived fields:
 | `salary_level`     | Bucketed salary: `Entry` (below $50K), `Mid` ($50K to $100K), `Senior` (above $100K), or `Unknown`   |
 | `experience_level` | Bucketed experience: `Junior` (0 to 3 yrs), `Mid` (4 to 7 yrs), `Senior` (above 7 yrs), or `Unknown` |
 
-#### `language_popularity`
+**`language_popularity`** (`models/marts/tech/language_popularity.sql`)
 
-**Location:** `models/marts/tech/language_popularity.sql`
-
-Counts how many developers have worked with each programming language. Languages are split from the multi-value `LanguageHaveWorkedWith` field.
+Counts how many developers have worked with each programming language, split from the multi-value `LanguageHaveWorkedWith` field.
 
 | Column                 | Description                       |
 | ---------------------- | --------------------------------- |
 | `programming_language` | Name of the programming language  |
 | `developer_count`      | Number of respondents who used it |
 
-#### `database_popularity`
+**`database_popularity`** (`models/marts/tech/database_popularity.sql`)
 
-**Location:** `models/marts/tech/database_popularity.sql`
-
-Counts how many developers have worked with each database tool. Databases are split from the multi-value `DatabaseHaveWorkedWith` field.
+Counts how many developers have worked with each database tool, split from the multi-value `DatabaseHaveWorkedWith` field.
 
 | Column            | Description                       |
 | ----------------- | --------------------------------- |
 | `database_tools`  | Name of the database or tool      |
 | `developer_count` | Number of respondents who used it |
 
+**`ml_salary_features`** (`models/marts/ml/ml_salary_features.sql`)
+
+Feature table for the salary model. Built from `developer_profile`, keeping only respondents with a known salary level.
+
+| Column             | Role    |
+| ------------------ | ------- |
+| `country`          | Feature |
+| `age`              | Feature |
+| `education_level`  | Feature |
+| `dev_type`         | Feature |
+| `employment`       | Feature |
+| `org_size`         | Feature |
+| `remote_work`      | Feature |
+| `experience_level` | Feature |
+| `salary_level`     | Target  |
+
+**Data tests applied:** `salary_level` must not be null and must be one of `Entry`, `Mid`, `Senior`.
+
+### Step 4 🤖 Train (`ml/train.py`)
+
+1. Reads `analytics.ml_salary_features` from PostgreSQL
+2. Fills missing feature values with `Unknown` and groups rare categories (under 30 rows) into `Other`
+3. Splits data 80/20 with stratification on the target
+4. Trains a pipeline of `OneHotEncoder` and `RandomForestClassifier` (balanced class weights)
+5. Evaluates against a baseline that always predicts the most common class
+6. Saves the model, metrics, and dropdown options to `ml/artifacts/`
+
+### Step 5 📱 Serve (`ml/app.py`)
+
+A Streamlit app where users pick a developer profile (country, age, education, role, employment, organization size, work arrangement, experience) and get:
+
+- The predicted salary level with its range
+- Confidence for each level
+- Model performance compared to the baseline
+
+---
+
+## 📈 Model Results
+
+| Metric            | Score  |
+| ----------------- | ------ |
+| Training rows     | 16,279 |
+| Accuracy          | 69.1%  |
+| Macro F1          | 0.695  |
+| Baseline accuracy | 36.8%  |
+
+The model beats the baseline by about 32 percentage points. Salaries are reported in USD, so country has a strong influence on predictions. Results should be read as rough estimates rather than precise salary guidance.
+
+---
+
+## ⚙️ Prerequisites
+
+- **Docker** and **Docker Compose**
+- The raw survey file `survey_results_public.csv` from the [Stack Overflow Developer Survey](https://survey.stackoverflow.co/) (2023 edition)
+
 ---
 
 ## 🚀 Getting Started
 
-### Prerequisites
-
-- Python 3.x
-- dbt installed and configured
-
-### Step 1 — Set up the Python environment
-
-Create and activate a virtual environment, then install dependencies:
+### 1️⃣ Clone the repository
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install pandas dbt-core
+git clone https://github.com/anpabeltj/stackoverflow-survey-pipeline.git
+cd stackoverflow-survey-pipeline
 ```
 
-### Step 2 — Download the raw survey data
-
-The raw survey file is not included in this repository. Download `survey_results_public.csv` from the Stack Overflow Annual Developer Survey page and place it in the **project root** folder (next to `extract.py`).
-
-### Step 3 — Extract the sample data
-
-Run the Python script to generate the seed file from the raw survey:
+### 2️⃣ Configure environment variables
 
 ```bash
-python extract.py
+cp .env.example .env
 ```
 
-This reads `survey_results_public.csv` and writes a 5,000-row random sample to `seeds/raw_survey.csv`.
-
-### Step 4 — Load the seed into the database
-
-```bash
-dbt seed
+```
+DB_USER=so_user
+DB_PASS=so_pass
+DB_NAME=so_db
+# Used only when running scripts outside Docker
+DB_HOST=localhost
+DB_PORT=5436
 ```
 
-### Step 5 — Run the models
+> 💡 Inside Docker, Compose automatically overrides `DB_HOST=postgres` and `DB_PORT=5432`.
+
+### 3️⃣ Place the raw survey file
+
+Put `survey_results_public.csv` in the **project root**, next to `extract.py`.
+
+### 4️⃣ Run everything
 
 ```bash
-dbt run
+docker compose up --build
 ```
 
-This builds both the staging view and all three marts tables.
+> ⏳ The first build downloads dbt, scikit-learn, and Streamlit, so it can take a while on slow connections. Later runs reuse the cached image.
 
-### Step 6 — Run data tests
+This starts three containers:
+
+| Container     | Purpose                                                          | Port |
+| ------------- | ---------------------------------------------------------------- | ---- |
+| `so-postgres` | PostgreSQL data warehouse                                        | 5436 |
+| `so-pipeline` | Runs extract, load, `dbt debug`, `dbt run`, `dbt test`, training | none |
+| `so-app`      | Streamlit prediction app                                         | 8501 |
+
+The pipeline waits until PostgreSQL is healthy and runs every step in order. The app starts only after the pipeline completes successfully.
+
+### 5️⃣ Open the app
+
+Go to **http://localhost:8501**.
+
+### 6️⃣ Check the data (optional)
+
+Follow the pipeline logs:
 
 ```bash
-dbt test
+docker compose logs -f pipeline
+```
+
+A successful run prints the model accuracy at the end.
+
+List the analytics tables:
+
+```bash
+docker exec -it so-postgres psql -U so_user -d so_db -c "\dt analytics.*"
+```
+
+Or connect any PostgreSQL client (DBeaver, TablePlus, pgAdmin) to `localhost:5436` with the credentials from `.env`.
+
+---
+
+## 🗄️ Database Schemas
+
+| Schema      | Objects                                                                                                      |
+| ----------- | ------------------------------------------------------------------------------------------------------------ |
+| `raw`       | `raw_survey` (all columns stored as text)                                                                    |
+| `analytics` | `stg_survey` (view), `developer_profile`, `language_popularity`, `database_popularity`, `ml_salary_features` |
+
+---
+
+## 🔁 Rerunning
+
+Code changes do not need a rebuild because the project folder is mounted into the containers.
+
+Rerun the full pipeline:
+
+```bash
+docker compose rm -f pipeline && docker compose up
+```
+
+Reload only the app after editing `ml/app.py`:
+
+```bash
+docker compose restart app
+```
+
+Rebuild only when `requirements.txt` or `Dockerfile` changes:
+
+```bash
+docker compose up --build
 ```
 
 ---
 
-## ⚙️ Configuration
+## 🛑 Stopping the Stack
 
-The dbt project profile is named `stackoverflow_survey`.
-
-Model materialization defaults:
-
-| Layer     | Type  |
-| --------- | ----- |
-| `staging` | View  |
-| `marts`   | Table |
+```bash
+docker compose down        # stop containers, keep data
+docker compose down -v     # stop containers and delete data
+```
 
 ---
 
 ## 📌 Notes
 
-- The `survey_results_public.csv` raw file is not committed to the repository (it is listed in `.gitignore`). You need to download it separately from the Stack Overflow survey website and place it in the project root before running `extract.py`.
-- The seed file `raw_survey.csv` contains only 5,000 randomly sampled rows (using `random_state=42` for reproducibility).
+- `survey_results_public.csv`, `data/`, `ml/artifacts/`, and `.env` are not committed to the repository.
+- The sample uses `random_state=42`, so every run produces the same 30,000 rows.
+- `profiles.yml` lives in the project root and reads credentials from environment variables, so no `~/.dbt/` setup is needed.

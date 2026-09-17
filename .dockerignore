@@ -1,0 +1,8 @@
+survey_results_public.csv
+data/
+target/
+logs/
+dbt_packages/
+ml/artifacts/
+.venv/
+.git/

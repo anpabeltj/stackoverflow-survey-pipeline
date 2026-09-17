@@ -1,0 +1,12 @@
+version: 2
+
+models:
+  - name: ml_salary_features
+    description: Feature table for salary level classification. Only respondents with a known salary.
+    columns:
+      - name: salary_level
+        description: Target label
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['Entry', 'Mid', 'Senior']

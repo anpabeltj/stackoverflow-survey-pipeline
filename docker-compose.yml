@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: so-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5436:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pipeline:
+    build: .
+    image: so-survey-pipeline
+    container_name: so-pipeline
+    env_file: .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DBT_PROFILES_DIR: /app
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "mkdir -p data &&
+             python extract.py &&
+             python load.py &&
+             dbt debug &&
+             dbt run &&
+             dbt test &&
+             python ml/train.py"
+
+  app:
+    image: so-survey-pipeline
+    pull_policy: never
+    container_name: so-app
+    env_file: .env
+    environment:
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    volumes:
+      - .:/app
+    ports:
+      - "8501:8501"
+    depends_on:
+      pipeline:
+        condition: service_completed_successfully
+    command: streamlit run ml/app.py --server.address=0.0.0.0 --server.port=8501
+
+volumes:
+  pgdata:
